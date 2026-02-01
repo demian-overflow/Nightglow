@@ -1,0 +1,23 @@
+# Step 2: Create a BrowserSession against the pool.
+# The operator calls the SmilingFriend API to create a real browser session
+# with the specified viewport, launch params, and stealth settings.
+apiVersion: nightglow.orderout.io/v1alpha1
+kind: BrowserSession
+metadata:
+  name: login-session
+  namespace: browser-automation
+spec:
+  poolRef: default-pool
+  viewport:
+    width: 1920
+    height: 1080
+  launchParams:
+    stealth: true
+    blockAds: true
+    locale: "en-US"
+    timezone: "America/New_York"
+    args:
+      - "--disable-blink-features=AutomationControlled"
+  ttl: 600  # 10 minutes
+  persistent: true
+  idleProfile: casual

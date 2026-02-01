@@ -1,0 +1,31 @@
+# Step 3b: Submit a login task using a registered task definition.
+# This uses the SmilingFriend server's built-in "login" task definition.
+# Input matches the login task's expected schema.
+apiVersion: nightglow.orderout.io/v1alpha1
+kind: AutomationTask
+metadata:
+  name: login-example
+  namespace: browser-automation
+spec:
+  taskName: login
+  sessionRef: login-session
+  idleProfile: methodical
+  timeout: 90
+  persistSession: true
+
+  input:
+    url: "https://example.com/login"
+    emailSelector: "#email"
+    passwordSelector: "#password"
+    submitSelector: "button[type='submit']"
+    email: "user@example.com"
+    password: "secure-password-here"
+    successIndicator: ".dashboard"
+
+  retryPolicy:
+    maxRetries: 2
+    backoffMs: 2000
+    backoffMultiplier: 1.5
+    retryableErrors:
+      - ELEMENT_NOT_FOUND
+      - TIMEOUT

@@ -1,0 +1,125 @@
+# Step 3c: A detailed form-fill task with assertions and failure strategies.
+# Demonstrates the full action spec power: typing with errors, assertions,
+# per-action failure strategies, and idle overrides.
+apiVersion: nightglow.orderout.io/v1alpha1
+kind: AutomationTask
+metadata:
+  name: fill-registration-form
+  namespace: browser-automation
+spec:
+  taskName: custom
+  sessionRef: login-session
+  timeout: 120
+  persistSession: true
+  idleProfile: custom
+  customIdleProfile:
+    baseIdle:
+      min: 400
+      max: 900
+    afterNavigation:
+      min: 1200
+      max: 3500
+    afterClick:
+      min: 200
+      max: 700
+    afterType:
+      min: 150
+      max: 500
+    beforeSubmit:
+      min: 1000
+      max: 3000
+    decisionTime:
+      min: 800
+      max: 2500
+    readingWpm: 180
+    distractionProbability: 0.03
+    distractionDuration:
+      min: 2000
+      max: 6000
+
+  actions:
+    - name: Navigate to registration
+      type: navigate
+      params:
+        url: "https://example.com/register"
+        waitUntil: domcontentloaded
+
+    - name: Accept cookies
+      type: click
+      target:
+        text: "Accept"
+      onFailure: skip  # Cookie banner may not appear
+
+    - name: Type first name
+      type: type
+      target:
+        selector: "#firstName"
+      params:
+        text: "John"
+        clearFirst: true
+        withErrors: true  # Simulate typos
+
+    - name: Type last name
+      type: type
+      target:
+        selector: "#lastName"
+      params:
+        text: "Doe"
+        clearFirst: true
+
+    - name: Type email
+      type: type
+      target:
+        selector: "#email"
+      params:
+        text: "john.doe@example.com"
+        clearFirst: true
+      assertion:
+        type: attribute
+        selector: "#email"
+        expected: "john.doe@example.com"
+
+    - name: Select country
+      type: select
+      target:
+        selector: "#country"
+      params:
+        value: "US"
+
+    - name: Check terms
+      type: click
+      target:
+        selector: "#terms-checkbox"
+      assertion:
+        type: exists
+        selector: "#terms-checkbox:checked"
+
+    - name: Submit registration
+      type: clickAndWaitForNavigation
+      target:
+        selector: "button[type='submit']"
+      params:
+        waitUntil: networkidle2
+      idleOverride:
+        beforeSubmit:
+          min: 1500
+          max: 4000
+      onFailure: retry
+
+    - name: Verify success page
+      type: wait
+      target:
+        selector: ".success-message"
+      params:
+        state: visible
+        timeout: 15000
+      assertion:
+        type: text
+        selector: ".success-message"
+        expected: "Registration complete"
+
+    - name: Screenshot confirmation
+      type: screenshot
+      params:
+        fullPage: true
+        encoding: base64

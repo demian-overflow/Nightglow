@@ -1,0 +1,23 @@
+# Step 1: Create a BrowserlessPool.
+# The operator creates a Deployment + Service running browserless.
+# This is the foundation — sessions and tasks run against this pool.
+apiVersion: nightglow.orderout.io/v1alpha1
+kind: BrowserlessPool
+metadata:
+  name: default-pool
+  namespace: browser-automation
+spec:
+  image: ghcr.io/browserless/multi:latest
+  replicas: 2
+  concurrent: 10
+  token: "6R0W53R135510"
+  port: 3000
+  stealth: true
+  resources:
+    cpuRequest: "500m"
+    cpuLimit: "2"
+    memoryRequest: "1Gi"
+    memoryLimit: "4Gi"
+  healthCheck:
+    intervalSeconds: 10
+    timeoutSeconds: 5

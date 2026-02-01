@@ -1,0 +1,59 @@
+# Step 3a: Submit an AutomationTask with inline actions.
+# This navigates to a page, waits for content, and extracts data.
+# Every action is recorded. On completion, a TaskRecord is created automatically.
+apiVersion: nightglow.orderout.io/v1alpha1
+kind: AutomationTask
+metadata:
+  name: extract-hn-titles
+  namespace: browser-automation
+spec:
+  taskName: custom
+  sessionRef: login-session
+  idleProfile: focused
+  timeout: 60
+  persistSession: true
+
+  actions:
+    - name: Navigate to Hacker News
+      type: navigate
+      params:
+        url: "https://news.ycombinator.com"
+        waitUntil: networkidle2
+
+    - name: Wait for content
+      type: wait
+      target:
+        selector: ".titleline"
+      params:
+        state: visible
+        timeout: 10000
+
+    - name: Extract first title
+      type: extract
+      target:
+        selector: ".titleline > a"
+      params:
+        innerText: true
+
+    - name: Screenshot the page
+      type: screenshot
+      params:
+        fullPage: false
+        encoding: base64
+
+    - name: Scroll down
+      type: scroll
+      params:
+        direction: down
+        pixels: 500
+
+    - name: Extract second batch
+      type: extract
+      target:
+        xpath: "//span[@class='titleline']/a"
+      params:
+        innerText: true
+
+  # After completion, check:
+  #   kubectl get taskrecords -n browser-automation
+  #   kubectl get atask extract-hn-titles -n browser-automation -o yaml

@@ -1,0 +1,54 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nightglow-operator-manager-role
+rules:
+  # Nightglow CRDs
+  - apiGroups: ["nightglow.orderout.io"]
+    resources:
+      - browserlesspools
+      - browsersessions
+      - automationtasks
+      - taskrecords
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["nightglow.orderout.io"]
+    resources:
+      - browserlesspools/status
+      - browsersessions/status
+      - automationtasks/status
+    verbs: [get, update, patch]
+  # Deployments for BrowserlessPool
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Services for BrowserlessPool
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Secrets for token references
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+  # Events for status reporting
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nightglow-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nightglow-operator-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: nightglow-operator
+    namespace: nightglow-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nightglow-operator
+  namespace: nightglow-system

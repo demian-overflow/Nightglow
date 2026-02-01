@@ -1,0 +1,144 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: browsersessions.nightglow.orderout.io
+spec:
+  group: nightglow.orderout.io
+  names:
+    kind: BrowserSession
+    listKind: BrowserSessionList
+    plural: browsersessions
+    singular: browsersession
+    shortNames:
+      - bsess
+      - bs
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Pool
+          type: string
+          jsonPath: .spec.poolRef
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: URL
+          type: string
+          jsonPath: .status.currentURL
+          priority: 1
+        - name: LockedBy
+          type: string
+          jsonPath: .status.lockedBy
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [poolRef]
+              properties:
+                poolRef:
+                  type: string
+                viewport:
+                  type: object
+                  properties:
+                    width:
+                      type: integer
+                    height:
+                      type: integer
+                launchParams:
+                  type: object
+                  properties:
+                    headless:
+                      type: boolean
+                    stealth:
+                      type: boolean
+                    blockAds:
+                      type: boolean
+                    proxy:
+                      type: string
+                    args:
+                      type: array
+                      items:
+                        type: string
+                    ignoreDefaultArgs:
+                      type: array
+                      items:
+                        type: string
+                    userAgent:
+                      type: string
+                    locale:
+                      type: string
+                    timezone:
+                      type: string
+                ttl:
+                  type: integer
+                  format: int64
+                  default: 300
+                persistent:
+                  type: boolean
+                  default: false
+                idleProfile:
+                  type: string
+                  enum: [casual, focused, rushed, methodical]
+                  default: casual
+                restoreFrom:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                sessionID:
+                  type: string
+                currentURL:
+                  type: string
+                lockedBy:
+                  type: string
+                state:
+                  type: object
+                  properties:
+                    cookieCount:
+                      type: integer
+                    localStorageKeys:
+                      type: integer
+                    currentURL:
+                      type: string
+                    viewportWidth:
+                      type: integer
+                    viewportHeight:
+                      type: integer
+                lastActivityAt:
+                  type: integer
+                  format: int64
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                    required: [type, status]

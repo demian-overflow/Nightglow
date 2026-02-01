@@ -1,0 +1,371 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: automationtasks.nightglow.orderout.io
+spec:
+  group: nightglow.orderout.io
+  names:
+    kind: AutomationTask
+    listKind: AutomationTaskList
+    plural: automationtasks
+    singular: automationtask
+    shortNames:
+      - atask
+      - at
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Task
+          type: string
+          jsonPath: .spec.taskName
+        - name: Session
+          type: string
+          jsonPath: .spec.sessionRef
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Progress
+          type: string
+          jsonPath: .status.progress
+        - name: Duration
+          type: string
+          jsonPath: .status.metrics.totalDurationMs
+        - name: Record
+          type: string
+          jsonPath: .status.recordRef
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [taskName, sessionRef]
+              properties:
+                taskName:
+                  type: string
+                sessionRef:
+                  type: string
+                input:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                actions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type]
+                    properties:
+                      name:
+                        type: string
+                      type:
+                        type: string
+                        enum: [navigate, click, clickAndWaitForNavigation, type, select, scroll, hover, press, wait, waitForContext, extract, screenshot, evaluate]
+                      target:
+                        type: object
+                        properties:
+                          selector:
+                            type: string
+                          xpath:
+                            type: string
+                          text:
+                            type: string
+                          role:
+                            type: string
+                          testId:
+                            type: string
+                          coordinates:
+                            type: object
+                            properties:
+                              x:
+                                type: integer
+                              y:
+                                type: integer
+                            required: [x, y]
+                      params:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                          waitUntil:
+                            type: string
+                          text:
+                            type: string
+                          clearFirst:
+                            type: boolean
+                          withErrors:
+                            type: boolean
+                          value:
+                            type: string
+                          values:
+                            type: array
+                            items:
+                              type: string
+                          direction:
+                            type: string
+                          pixels:
+                            type: integer
+                          toElement:
+                            type: boolean
+                          key:
+                            type: string
+                          timeout:
+                            type: integer
+                            format: int64
+                          state:
+                            type: string
+                          contextKey:
+                            type: string
+                          webhookUrl:
+                            type: string
+                          includeSessionId:
+                            type: boolean
+                          attribute:
+                            type: string
+                          property:
+                            type: string
+                          innerText:
+                            type: boolean
+                          innerHTML:
+                            type: boolean
+                          script:
+                            type: string
+                          args:
+                            type: array
+                            items:
+                              type: string
+                          fullPage:
+                            type: boolean
+                          encoding:
+                            type: string
+                      assertion:
+                        type: object
+                        required: [type]
+                        properties:
+                          type:
+                            type: string
+                            enum: [exists, visible, text, attribute, url, custom]
+                          expected:
+                            type: string
+                          selector:
+                            type: string
+                          timeout:
+                            type: integer
+                            format: int64
+                      onFailure:
+                        type: string
+                        enum: [abort, skip, retry, fallback]
+                        default: abort
+                      idleOverride:
+                        type: object
+                        properties:
+                          baseIdle:
+                            type: object
+                            properties:
+                              min:
+                                type: integer
+                              max:
+                                type: integer
+                            required: [min, max]
+                          beforeSubmit:
+                            type: object
+                            properties:
+                              min:
+                                type: integer
+                              max:
+                                type: integer
+                            required: [min, max]
+                idleProfile:
+                  type: string
+                  enum: [casual, focused, rushed, methodical, custom]
+                customIdleProfile:
+                  type: object
+                  properties:
+                    baseIdle:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    afterNavigation:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    afterClick:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    afterType:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    afterScroll:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    beforeSubmit:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    decisionTime:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                    readingWpm:
+                      type: integer
+                    distractionProbability:
+                      type: number
+                    distractionDuration:
+                      type: object
+                      properties:
+                        min: { type: integer }
+                        max: { type: integer }
+                      required: [min, max]
+                timeout:
+                  type: integer
+                  format: int64
+                  default: 120
+                retryPolicy:
+                  type: object
+                  properties:
+                    maxRetries:
+                      type: integer
+                    backoffMs:
+                      type: integer
+                    backoffMultiplier:
+                      type: number
+                    retryableErrors:
+                      type: array
+                      items:
+                        type: string
+                persistSession:
+                  type: boolean
+                  default: true
+                webhookUrl:
+                  type: string
+                recordRef:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                taskID:
+                  type: string
+                progress:
+                  type: string
+                currentAction:
+                  type: object
+                  properties:
+                    index:
+                      type: integer
+                    total:
+                      type: integer
+                    name:
+                      type: string
+                    type:
+                      type: string
+                metrics:
+                  type: object
+                  properties:
+                    startedAt:
+                      type: integer
+                      format: int64
+                    completedAt:
+                      type: integer
+                      format: int64
+                    totalDurationMs:
+                      type: integer
+                      format: int64
+                    actionCount:
+                      type: integer
+                    idleTimeMs:
+                      type: integer
+                      format: int64
+                    retryCount:
+                      type: integer
+                output:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                error:
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                    message:
+                      type: string
+                    actionIndex:
+                      type: integer
+                    actionName:
+                      type: string
+                    recoverable:
+                      type: boolean
+                recordRef:
+                  type: string
+                actionLog:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: integer
+                      name:
+                        type: string
+                      type:
+                        type: string
+                      success:
+                        type: boolean
+                      durationMs:
+                        type: integer
+                        format: int64
+                      error:
+                        type: string
+                      extractedValue:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      timestamp:
+                        type: integer
+                        format: int64
+                    required: [index, type, success, timestamp]
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                    required: [type, status]
