@@ -484,7 +484,7 @@ Nightglow Instrumentation
     │                                           │
     │                                    ┌──────┴──────┐
     │                                    ▼             ▼
-    │                                 Jaeger      Prometheus
+    │                                  Tempo      Prometheus
     │                               (traces)      (metrics)
     │
     └── KafkaJS Producer ──▶ Kafka Broker
@@ -501,7 +501,7 @@ Nightglow Instrumentation
 
 The collector receives OTLP (gRPC on 4317, HTTP on 4318), batches with a 5s timeout and 1024 batch size, limits memory to 512 MiB, and exports to:
 
-- **Jaeger** (OTLP gRPC on port 4317) — for traces
+- **Tempo** (OTLP gRPC on port 4317) — for traces
 - **Prometheus** (scrape endpoint on port 8889, namespace `nightglow`) — for metrics
 - **Kafka** (topic `nightglow.otel-export`, OTLP JSON encoding) — for downstream processing
 

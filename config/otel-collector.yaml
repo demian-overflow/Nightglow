@@ -16,9 +16,9 @@ processors:
     limit_mib: 512
 
 exporters:
-  # Send traces to Jaeger
-  otlp/jaeger:
-    endpoint: jaeger:4317
+  # Send traces to Tempo
+  otlp/tempo:
+    endpoint: tempo:4317
     tls:
       insecure: true
 
@@ -43,7 +43,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/jaeger, kafka]
+      exporters: [otlp/tempo, kafka]
 
     metrics:
       receivers: [otlp]

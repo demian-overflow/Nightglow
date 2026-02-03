@@ -32,10 +32,16 @@ func NewClient(baseURL string) *Client {
 // ---------- Sessions ----------
 
 type CreateSessionRequest struct {
-	SessionID   string       `json:"sessionId,omitempty"`
-	Viewport    *Viewport    `json:"viewport,omitempty"`
+	SessionID    string      `json:"sessionId,omitempty"`
+	Viewport     *Viewport   `json:"viewport,omitempty"`
 	LaunchParams interface{} `json:"launchParams,omitempty"`
-	TTL         int64        `json:"ttl,omitempty"`
+	TTL          int64       `json:"ttl,omitempty"`
+
+	// Profile acquisition options
+	ProfileID      string `json:"profileId,omitempty"`
+	ResourceTreeID string `json:"resourceTreeId,omitempty"`
+	WorkerID       string `json:"workerId,omitempty"`
+	AcquisitionTTL int64  `json:"acquisitionTtlMs,omitempty"`
 }
 
 type Viewport struct {
@@ -46,6 +52,11 @@ type Viewport struct {
 type CreateSessionResponse struct {
 	SessionID string `json:"sessionId"`
 	CreatedAt int64  `json:"createdAt"`
+
+	// Profile acquisition info (when profile was requested)
+	AcquisitionID string `json:"acquisitionId,omitempty"`
+	ProfileID     string `json:"profileId,omitempty"`
+	ProfileName   string `json:"profileName,omitempty"`
 }
 
 func (c *Client) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
@@ -111,14 +122,14 @@ func (c *Client) SubmitTask(ctx context.Context, req SubmitTaskRequest) (*Submit
 }
 
 type TaskStatus struct {
-	TaskID    string       `json:"taskId"`
-	TaskName  string       `json:"taskName"`
-	SessionID string       `json:"sessionId"`
-	Status    string       `json:"status"`
-	Progress  *Progress    `json:"progress,omitempty"`
-	Result    *TaskResult  `json:"result,omitempty"`
-	StartedAt int64        `json:"startedAt,omitempty"`
-	CompletedAt int64      `json:"completedAt,omitempty"`
+	TaskID      string      `json:"taskId"`
+	TaskName    string      `json:"taskName"`
+	SessionID   string      `json:"sessionId"`
+	Status      string      `json:"status"`
+	Progress    *Progress   `json:"progress,omitempty"`
+	Result      *TaskResult `json:"result,omitempty"`
+	StartedAt   int64       `json:"startedAt,omitempty"`
+	CompletedAt int64       `json:"completedAt,omitempty"`
 }
 
 type Progress struct {
@@ -129,7 +140,7 @@ type Progress struct {
 
 type TaskResult struct {
 	TaskID    string                 `json:"taskId"`
-	SessionID string                `json:"sessionId"`
+	SessionID string                 `json:"sessionId"`
 	Status    string                 `json:"status"`
 	Output    map[string]interface{} `json:"output,omitempty"`
 	Error     *TaskError             `json:"error,omitempty"`
@@ -170,8 +181,8 @@ type HealthResponse struct {
 }
 
 type DetailedHealth struct {
-	Status         string `json:"status"`
-	ActiveSessions int    `json:"activeSessions"`
+	Status         string             `json:"status"`
+	ActiveSessions int                `json:"activeSessions"`
 	Browserless    *BrowserlessHealth `json:"browserless,omitempty"`
 }
 

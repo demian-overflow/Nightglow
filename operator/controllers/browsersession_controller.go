@@ -95,6 +95,26 @@ func (r *BrowserSessionReconciler) handlePending(ctx context.Context, session *n
 		createReq.TTL = session.Spec.TTL * 1000 // Convert seconds to ms
 	}
 
+	// Add profile acquisition options if specified
+	if session.Spec.ProfileRef != "" {
+		createReq.ProfileID = session.Spec.ProfileRef
+		createReq.ResourceTreeID = session.Spec.ResourceTreeRef
+
+		// Use WorkerID from spec or default to session name
+		if session.Spec.WorkerID != "" {
+			createReq.WorkerID = session.Spec.WorkerID
+		} else {
+			createReq.WorkerID = fmt.Sprintf("%s/%s", session.Namespace, session.Name)
+		}
+
+		// Use AcquisitionTTL from spec or default to session TTL
+		if session.Spec.AcquisitionTTL > 0 {
+			createReq.AcquisitionTTL = session.Spec.AcquisitionTTL * 1000 // Convert seconds to ms
+		} else if session.Spec.TTL > 0 {
+			createReq.AcquisitionTTL = session.Spec.TTL * 1000
+		}
+	}
+
 	resp, err := apiClient.CreateSession(ctx, createReq)
 	if err != nil {
 		logger.Error(err, "Failed to create browser session")
@@ -104,6 +124,13 @@ func (r *BrowserSessionReconciler) handlePending(ctx context.Context, session *n
 	session.Status.Phase = "Active"
 	session.Status.SessionID = resp.SessionID
 	session.Status.LastActivityAt = time.Now().UnixMilli()
+
+	// Store profile acquisition info if present
+	if resp.AcquisitionID != "" {
+		session.Status.AcquisitionID = resp.AcquisitionID
+		session.Status.ProfileID = resp.ProfileID
+		session.Status.ProfileName = resp.ProfileName
+	}
 
 	setCondition(&session.Status.Conditions, metav1.Condition{
 		Type:               "Ready",
@@ -117,7 +144,8 @@ func (r *BrowserSessionReconciler) handlePending(ctx context.Context, session *n
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Browser session created", "sessionID", resp.SessionID)
+	logger.Info("Browser session created", "sessionID", resp.SessionID,
+		"profileID", resp.ProfileID, "acquisitionID", resp.AcquisitionID)
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 

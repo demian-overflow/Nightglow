@@ -41,7 +41,7 @@ Nightglow has two halves: a **TypeScript instrumentation library** that embeds i
               ┌───────────────────┼───────────────────┐
               ▼                   ▼                   ▼
         ┌──────────┐       ┌──────────┐       ┌──────────┐
-        │  Kafka   │       │  Jaeger  │       │Prometheus│
+        │  Kafka   │       │  Tempo   │       │Prometheus│
         │  Topics  │       │  Traces  │       │ Metrics  │
         └──────────┘       └──────────┘       └──────────┘
 ```
@@ -57,7 +57,7 @@ src/
 ├── types/           # Instrument, Blueprint, Event, Config types
 ├── instruments/     # Factory (creates from blueprints), Registry, built-in templates
 ├── kafka/           # EventProducer (buffered + batched), CommandConsumer
-├── observability/   # OpenTelemetry traces (Jaeger) + metrics (Prometheus)
+├── observability/   # OpenTelemetry traces (Tempo) + metrics (Prometheus)
 ├── embedder/        # Hooks into action lifecycle phases via CDP
 ├── nightglow.ts     # Top-level facade
 └── index.ts         # Exports
@@ -136,8 +136,8 @@ npm install
 ### Start Observability Stack
 
 ```bash
-# From the BrowserAutomation root (includes Kafka, Jaeger, Prometheus, OTel collector)
-docker compose up -d kafka otel-collector jaeger prometheus kafka-ui
+# From the BrowserAutomation root (includes Kafka, Tempo, Grafana, Prometheus, OTel collector)
+docker compose up -d kafka otel-collector tempo grafana prometheus kafka-ui
 ```
 
 ## CRDs
@@ -249,7 +249,8 @@ The root `docker-compose.yml` includes the full observability stack:
 | Kafka (KRaft) | 9092 | - |
 | Kafka UI | 8090 | `http://localhost:8090` |
 | OTel Collector | 4317 (gRPC), 4318 (HTTP) | - |
-| Jaeger | 16686 | `http://localhost:16686` |
+| Tempo | 3200 | - |
+| Grafana | 3100 | `http://localhost:3100` |
 | Prometheus | 9090 | `http://localhost:9090` |
 
 ## Stats

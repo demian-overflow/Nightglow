@@ -98,6 +98,20 @@ spec:
                   default: casual
                 restoreFrom:
                   type: string
+                profileRef:
+                  type: string
+                  description: Name or ID of a browser fingerprint profile to use
+                resourceTreeRef:
+                  type: string
+                  description: Name or ID of the resource tree to acquire against
+                acquisitionTTL:
+                  type: integer
+                  format: int64
+                  default: 0
+                  description: TTL for profile acquisition in seconds
+                workerID:
+                  type: string
+                  description: Worker ID for profile acquisition tracking
             status:
               type: object
               properties:
@@ -125,6 +139,15 @@ spec:
                 lastActivityAt:
                   type: integer
                   format: int64
+                acquisitionID:
+                  type: string
+                  description: ID of the profile acquisition for this session
+                profileID:
+                  type: string
+                  description: ID of the acquired profile
+                profileName:
+                  type: string
+                  description: Name of the acquired profile
                 conditions:
                   type: array
                   items:

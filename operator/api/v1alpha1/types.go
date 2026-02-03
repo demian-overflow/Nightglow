@@ -137,6 +137,23 @@ type BrowserSessionSpec struct {
 
 	// RestoreFrom is an optional session name to restore state from.
 	RestoreFrom string `json:"restoreFrom,omitempty"`
+
+	// ProfileRef is the name or ID of a browser fingerprint profile to use.
+	// When set, the session will acquire and inject the profile's fingerprint.
+	ProfileRef string `json:"profileRef,omitempty"`
+
+	// ResourceTreeRef is the name or ID of the resource tree to acquire against.
+	// Required when ProfileRef is set.
+	ResourceTreeRef string `json:"resourceTreeRef,omitempty"`
+
+	// AcquisitionTTL is the TTL for the profile acquisition in seconds.
+	// Defaults to the session TTL if not specified.
+	// +kubebuilder:default=0
+	AcquisitionTTL int64 `json:"acquisitionTTL,omitempty"`
+
+	// WorkerID identifies the worker for profile acquisition tracking.
+	// Defaults to the session name if not specified.
+	WorkerID string `json:"workerID,omitempty"`
 }
 
 type BrowserSessionStatus struct {
@@ -157,6 +174,15 @@ type BrowserSessionStatus struct {
 
 	// LastActivityAt is the unix timestamp of last action.
 	LastActivityAt int64 `json:"lastActivityAt,omitempty"`
+
+	// AcquisitionID is the ID of the profile acquisition for this session.
+	AcquisitionID string `json:"acquisitionID,omitempty"`
+
+	// ProfileID is the ID of the acquired profile.
+	ProfileID string `json:"profileID,omitempty"`
+
+	// ProfileName is the name of the acquired profile.
+	ProfileName string `json:"profileName,omitempty"`
 
 	// Conditions for standard k8s condition tracking.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -454,15 +480,15 @@ type Viewport struct {
 }
 
 type LaunchParams struct {
-	Headless         *bool    `json:"headless,omitempty"`
-	Stealth          bool     `json:"stealth,omitempty"`
-	BlockAds         bool     `json:"blockAds,omitempty"`
-	Proxy            string   `json:"proxy,omitempty"`
-	Args             []string `json:"args,omitempty"`
+	Headless          *bool    `json:"headless,omitempty"`
+	Stealth           bool     `json:"stealth,omitempty"`
+	BlockAds          bool     `json:"blockAds,omitempty"`
+	Proxy             string   `json:"proxy,omitempty"`
+	Args              []string `json:"args,omitempty"`
 	IgnoreDefaultArgs []string `json:"ignoreDefaultArgs,omitempty"`
-	UserAgent        string   `json:"userAgent,omitempty"`
-	Locale           string   `json:"locale,omitempty"`
-	Timezone         string   `json:"timezone,omitempty"`
+	UserAgent         string   `json:"userAgent,omitempty"`
+	Locale            string   `json:"locale,omitempty"`
+	Timezone          string   `json:"timezone,omitempty"`
 }
 
 type RetryPolicySpec struct {
@@ -507,12 +533,12 @@ type ActionProgress struct {
 }
 
 type TaskMetricsStatus struct {
-	StartedAt      int64 `json:"startedAt,omitempty"`
-	CompletedAt    int64 `json:"completedAt,omitempty"`
+	StartedAt       int64 `json:"startedAt,omitempty"`
+	CompletedAt     int64 `json:"completedAt,omitempty"`
 	TotalDurationMs int64 `json:"totalDurationMs,omitempty"`
-	ActionCount    int   `json:"actionCount,omitempty"`
-	IdleTimeMs     int64 `json:"idleTimeMs,omitempty"`
-	RetryCount     int   `json:"retryCount,omitempty"`
+	ActionCount     int   `json:"actionCount,omitempty"`
+	IdleTimeMs      int64 `json:"idleTimeMs,omitempty"`
+	RetryCount      int   `json:"retryCount,omitempty"`
 }
 
 type TaskErrorStatus struct {
@@ -524,12 +550,12 @@ type TaskErrorStatus struct {
 }
 
 type ActionResult struct {
-	Index     int    `json:"index"`
-	Name      string `json:"name,omitempty"`
-	Type      string `json:"type"`
-	Success   bool   `json:"success"`
-	DurationMs int64 `json:"durationMs,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Index      int    `json:"index"`
+	Name       string `json:"name,omitempty"`
+	Type       string `json:"type"`
+	Success    bool   `json:"success"`
+	DurationMs int64  `json:"durationMs,omitempty"`
+	Error      string `json:"error,omitempty"`
 	// +kubebuilder:pruning:PreserveUnknownFields
 	ExtractedValue map[string]interface{} `json:"extractedValue,omitempty"`
 	Timestamp      int64                  `json:"timestamp"`
@@ -538,15 +564,15 @@ type ActionResult struct {
 // ---- TaskRecord sub-types ----
 
 type ActionRecord struct {
-	Name      string         `json:"name,omitempty"`
-	Type      string         `json:"type"`
-	Target    *ActionTarget  `json:"target,omitempty"`
-	Params    *ActionParams  `json:"params,omitempty"`
-	Result    ActionResult   `json:"result"`
+	Name   string        `json:"name,omitempty"`
+	Type   string        `json:"type"`
+	Target *ActionTarget `json:"target,omitempty"`
+	Params *ActionParams `json:"params,omitempty"`
+	Result ActionResult  `json:"result"`
 }
 
 type TaskResultRecord struct {
-	Status  string                 `json:"status"`
+	Status string `json:"status"`
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Output  map[string]interface{} `json:"output,omitempty"`
 	Error   *TaskErrorStatus       `json:"error,omitempty"`
