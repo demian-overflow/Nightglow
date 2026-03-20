@@ -1,0 +1,45 @@
+[package]
+name = "nightglow"
+description = "Cloud-first stealth browser engine: profile management, fingerprinting, and telemetry"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Async + concurrency
+tokio = { workspace = true, features = ["full"] }
+parking_lot = { workspace = true }
+
+# IDs, time, randomness
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { workspace = true }
+rand = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging / tracing
+log = { workspace = true }
+tracing = { workspace = true }
+
+# OpenTelemetry
+opentelemetry = { version = "0.27", features = ["metrics", "trace"] }
+opentelemetry_sdk = { version = "0.27", features = ["metrics", "trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "metrics", "trace"] }
+opentelemetry-semantic-conventions = { version = "0.27" }
+
+# HTTP (for resource-tree fetching)
+hyper = { workspace = true }
+url = { workspace = true }
+
+# Config
+serde_yaml = "0.9"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

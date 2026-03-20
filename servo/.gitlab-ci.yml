@@ -1,0 +1,155 @@
+stages:
+  - build
+  - test
+  - cleanup
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_BUILDKIT: "1"
+
+# ── Build ──────────────────────────────────────────────────────────────────────
+# Compiles servoshell in release mode (multi-stage Docker build) and pushes
+# the resulting nightglow image to the registry.  Uses --cache-from :latest to
+# speed up Rust incremental compilation across pipeline runs.
+
+build:
+  stage: build
+  retry: 1
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build
+        --cache-from $CI_REGISTRY_IMAGE:latest
+        --build-arg BUILDKIT_INLINE_CACHE=1
+        -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+        -t $CI_REGISTRY_IMAGE:latest
+        .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 3h
+
+# ── Unit tests ─────────────────────────────────────────────────────────────────
+# Runs on every push, no Docker required.
+# The nightglow library crate is pure Rust (no system deps), so a stock
+# rust:1.92 image is enough.  Tests cover: ProfilePool acquire/release,
+# ResourceTree classification and safety checks.
+
+test-unit:
+  stage: test
+  image: rust:1.92
+  script:
+    - cargo test -p nightglow --locked -- --test-threads=4
+  rules:
+    - when: on_success
+  timeout: 30m
+  artifacts:
+    when: always
+    reports:
+      junit: test-results/unit-*.xml
+    expire_in: 1 week
+
+# ── Integration tests ──────────────────────────────────────────────────────────
+# Starts the built nightglow image and drives the running servoshell binary via
+# its W3C WebDriver HTTP server (port 7000).
+#
+# Architecture:
+#   docker network "testnet"
+#     └── nightglow-server  ← the servoshell binary (--headless --webdriver 7000)
+#     └── test runner       ← python:3.12 container sharing the same network,
+#                              hits http://nightglow-server:7000
+#
+# The Python test script (tests/integration/webdriver_tests.py) uses only the
+# stdlib + urllib — no Selenium or extra packages needed.
+
+test-integration:
+  stage: test
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    # Pull the image that was just built in the build stage
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+
+    # Create an isolated network so the test runner can reach the browser by name
+    - docker network create testnet
+
+    # Start servoshell headless with WebDriver enabled, listening on all interfaces
+    - |
+      docker run -d \
+        --name nightglow-server \
+        --network testnet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7000 about:blank
+
+    # Run the integration test suite inside a Python container on the same network.
+    # The test script polls /status until the browser is ready (up to 60s).
+    - |
+      docker run --rm \
+        --name nightglow-tests \
+        --network testnet \
+        -v "$CI_PROJECT_DIR/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/webdriver_tests.py \
+          --url http://nightglow-server:7000 \
+          --junit /tests/test-results/webdriver.xml
+
+  after_script:
+    # Always stop the browser container and copy results out regardless of outcome
+    - docker stop nightglow-server 2>/dev/null || true
+    - docker rm  nightglow-server 2>/dev/null || true
+    - docker network rm testnet    2>/dev/null || true
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 15m
+  artifacts:
+    when: always
+    paths:
+      - tests/integration/test-results/
+    reports:
+      junit: tests/integration/test-results/webdriver.xml
+    expire_in: 1 week
+
+# ── Cleanup ────────────────────────────────────────────────────────────────────
+# Deletes short-SHA tags from the registry after a successful build.
+# Keeps :latest and any semver tags.  Never blocks deployment (allow_failure).
+
+cleanup:
+  stage: cleanup
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      REPOS=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories" | jq -r '.[].id')
+      for REPO_ID in $REPOS; do
+        echo "→ Cleaning repo $REPO_ID"
+        STALE=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories/$REPO_ID/tags?per_page=100" | \
+          jq -r '.[] | select(.name | test("^[0-9a-f]{8}$")) | .name')
+        for TAG in $STALE; do
+          echo "  Deleting $TAG"
+          curl -sf -X DELETE --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories/$REPO_ID/tags/$TAG" || true
+        done
+      done
+  needs:
+    - build
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+      when: on_success
+  allow_failure: true

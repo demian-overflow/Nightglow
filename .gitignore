@@ -1,0 +1,8 @@
+servo/target/
+servo/.servo/
+servo/.cargo/*
+!servo/.cargo/config.*
+servo/.rustup
+servo/.servobuild
+servo/.wpt
+servo/android-toolchains/
