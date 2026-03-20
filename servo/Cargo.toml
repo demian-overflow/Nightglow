@@ -290,6 +290,7 @@ webgpu_traits = { package = "servo-webgpu-traits", version = "0.0.6", path = "co
 webxr = { package = "servo-webxr", version = "0.0.6", path = "components/webxr" }
 webxr-api = { package = "servo-webxr-api", version = "0.0.6", path = "components/shared/webxr" }
 xpath = { package = "servo-xpath", version = "0.0.6", path = "components/xpath" }
+nightglow = { version = "0.0.6", path = "components/nightglow" }
 # End workspace-version dependencies - Don't change this comment, we grep for it in scripts!
 
 # Independently versioned workspace local crates. These crates will not take part in auto-bumps.

@@ -9059,6 +9059,7 @@ dependencies = [
  "mime_guess",
  "napi-derive-ohos",
  "napi-ohos",
+ "nightglow",
  "nix",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",

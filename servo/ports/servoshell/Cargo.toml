@@ -73,6 +73,7 @@ libc = { workspace = true }
 servo = { workspace = true, features = ["background_hang_monitor", "bluetooth", "testbinding"], default-features = false }
 log = { workspace = true }
 mime_guess = { workspace = true }
+nightglow = { workspace = true }
 raw-window-handle = { workspace = true }
 rustls = { workspace = true, features = ["aws-lc-rs"] }
 tokio = { workspace = true }

@@ -67,7 +67,10 @@ test-integration:
         --name nightglow-server \
         --network testnet \
         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
-        --headless --webdriver 7000 about:blank
+        --headless --webdriver 7000 \
+        --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+        --nightglow-profile '{"user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","platform":"Win32","app_version":"5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","product":"Gecko","vendor":"Google Inc.","vendor_sub":"","product_sub":"20030107","language":"en-US","accept_language":"en-US,en;q=0.9","timezone":"America/New_York","timezone_offset":-300,"screen_width":1920,"screen_height":1080,"screen_avail_width":1920,"screen_avail_height":1040,"color_depth":24,"pixel_depth":24,"device_pixel_ratio":1.0,"inner_width":1280,"inner_height":720,"outer_width":1920,"outer_height":1080,"hardware_concurrency":8,"device_memory":8.0,"plugins":[{"name":"PDF Viewer","description":"Portable Document Format","filename":"internal-pdf-viewer","mime_types":["application/pdf","text/pdf"]}],"fonts":[],"canvas_noise_seed":12345678,"webgl_vendor":"Google Inc. (NVIDIA)","webgl_renderer":"ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)","webgl_unmasked_vendor":"NVIDIA Corporation","webgl_unmasked_renderer":"NVIDIA GeForce RTX 3070","audio_noise_seed":87654321,"proxy":null,"spoofed_ip":null,"do_not_track":false,"cookie_enabled":true,"java_enabled":false,"pdf_viewer_enabled":true,"hide_webdriver":true,"max_touch_points":0,"label":"chrome124-win11-us-east","id":"00000000-0000-0000-0000-000000000001"}' \
+        about:blank
     # Resolve IP so the Host header is an IP address — Servo's WebDriver
     # server whitelists all IP-addressed requests but rejects unknown domain names.
     - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-server)
@@ -135,9 +138,10 @@ test-proxy:
       docker run -d \
         --name nightglow-proxy \
         --network proxynet \
+        -e http_proxy="http://${PROXY_IP}:8888" \
+        -e https_proxy="http://${PROXY_IP}:8888" \
         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
         --headless --webdriver 7001 \
-        --proxy "http://${PROXY_IP}:8888" \
         about:blank
     - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-proxy)
     - echo "nightglow-proxy IP = $NIGHTGLOW_IP"

@@ -16,6 +16,7 @@ use std::{env, fmt};
 use bpaf::*;
 use euclid::Size2D;
 use log::warn;
+use nightglow::profiles::fingerprint::BrowserProfile;
 use serde_json::Value;
 use servo::user_contents::UserStyleSheet;
 use servo::{
@@ -537,6 +538,10 @@ struct CmdArgs {
     #[bpaf(external)]
     userscripts: Option<PathBuf>,
 
+    /// Accept a JSON-encoded NightglowProfile to inject fingerprint spoofing.
+    #[bpaf(short('N'), long, argument::<String>("JSON"), optional)]
+    nightglow_profile: Option<String>,
+
     ///
     /// Add each of the given UTF-8 encoded CSS files in the space or comma-separated
     /// list as user stylesheet to apply to every page loaded.
@@ -672,7 +677,7 @@ fn parse_arguments_helper(args_without_binary: Args) -> ArgumentParsingResult {
             default_window_size.min(screen_size_override)
         });
 
-    let servoshell_preferences = ServoShellPreferences {
+    let mut servoshell_preferences = ServoShellPreferences {
         url: Some(cmd_args.url),
         no_native_titlebar: cmd_args.no_native_titlebar,
         device_pixel_ratio_override: cmd_args.device_pixel_ratio,
@@ -696,6 +701,13 @@ fn parse_arguments_helper(args_without_binary: Args) -> ArgumentParsingResult {
         log_to_file: cmd_args.log_to_file,
         ..Default::default()
     };
+
+    if let Some(profile_json) = &cmd_args.nightglow_profile {
+        match serde_json::from_str::<BrowserProfile>(profile_json) {
+            Ok(profile) => apply_nightglow_profile(&profile, &mut preferences, &mut servoshell_preferences),
+            Err(e) => log::warn!("Failed to parse --nightglow-profile JSON: {e}"),
+        }
+    }
 
     let mut debug_options = DiagnosticsLogging::new();
 
@@ -734,6 +746,141 @@ fn parse_arguments_helper(args_without_binary: Args) -> ArgumentParsingResult {
     };
 
     ArgumentParsingResult::ChromeProcess(opts, preferences, servoshell_preferences)
+}
+
+fn apply_nightglow_profile(
+    profile: &BrowserProfile,
+    preferences: &mut Preferences,
+    servoshell_prefs: &mut ServoShellPreferences,
+) {
+    // 1. User-agent
+    preferences.user_agent = profile.user_agent.clone();
+
+    // 2. Proxy
+    if let Some(proxy_uri) = &profile.proxy {
+        preferences.network_http_proxy_uri = proxy_uri.clone();
+        preferences.network_https_proxy_uri = proxy_uri.clone();
+    }
+
+    // 3. Timezone via env var (Servo reads system TZ)
+    std::env::set_var("TZ", &profile.timezone);
+
+    // 4. Generate fingerprint userscript and write to temp dir
+    let script = generate_fingerprint_script(profile);
+    let temp_dir = std::env::temp_dir().join("nightglow-profile-scripts");
+    if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+        log::warn!("Could not create temp dir for profile scripts: {e}");
+        return;
+    }
+    let script_path = temp_dir.join("01.fingerprint.js");
+    if let Err(e) = std::fs::write(&script_path, &script) {
+        log::warn!("Could not write fingerprint script: {e}");
+        return;
+    }
+
+    // 5. Override userscripts directory (only if user didn't explicitly set one)
+    if servoshell_prefs.userscripts_directory.is_none() {
+        servoshell_prefs.userscripts_directory = Some(temp_dir);
+    }
+}
+
+fn generate_fingerprint_script(profile: &BrowserProfile) -> String {
+    let languages_json = profile.accept_language
+        .split(',')
+        .map(|s| {
+            let lang = s.split(';').next().unwrap_or("").trim();
+            format!("{lang:?}")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        r#"(function(){{
+"use strict";
+// NightGlow fingerprint injection — generated from profile
+var _def = function(obj, prop, val) {{
+  try {{ Object.defineProperty(obj, prop, {{ get: function(){{ return val; }}, configurable: true }}); }} catch(e) {{}}
+}};
+
+// navigator
+_def(navigator, 'userAgent', {user_agent:?});
+_def(navigator, 'appVersion', {app_version:?});
+_def(navigator, 'platform', {platform:?});
+_def(navigator, 'vendor', {vendor:?});
+_def(navigator, 'vendorSub', {vendor_sub:?});
+_def(navigator, 'productSub', {product_sub:?});
+_def(navigator, 'language', {language:?});
+_def(navigator, 'languages', [{languages_json}]);
+_def(navigator, 'hardwareConcurrency', {hardware_concurrency});
+_def(navigator, 'deviceMemory', {device_memory});
+_def(navigator, 'maxTouchPoints', {max_touch_points});
+_def(navigator, 'webdriver', undefined);
+_def(navigator, 'doNotTrack', {do_not_track});
+_def(navigator, 'cookieEnabled', {cookie_enabled});
+_def(navigator, 'javaEnabled', function(){{ return false; }});
+_def(navigator, 'pdfViewerEnabled', {pdf_viewer_enabled});
+
+// screen
+_def(screen, 'width', {screen_width});
+_def(screen, 'height', {screen_height});
+_def(screen, 'availWidth', {screen_avail_width});
+_def(screen, 'availHeight', {screen_avail_height});
+_def(screen, 'colorDepth', {color_depth});
+_def(screen, 'pixelDepth', {pixel_depth});
+_def(window, 'devicePixelRatio', {device_pixel_ratio});
+
+// window dimensions
+_def(window, 'innerWidth', {inner_width});
+_def(window, 'innerHeight', {inner_height});
+_def(window, 'outerWidth', {outer_width});
+_def(window, 'outerHeight', {outer_height});
+
+// timezone — override Intl.DateTimeFormat resolvedOptions
+(function() {{
+  var _Orig = Intl.DateTimeFormat;
+  var _tz = {timezone:?};
+  function PatchedDTF(locale, opts) {{
+    if (!opts || !opts.timeZone) opts = Object.assign({{}}, opts || {{}}, {{timeZone: _tz}});
+    return new _Orig(locale, opts);
+  }}
+  PatchedDTF.prototype = _Orig.prototype;
+  PatchedDTF.supportedLocalesOf = _Orig.supportedLocalesOf.bind(_Orig);
+  try {{ Intl.DateTimeFormat = PatchedDTF; }} catch(e) {{}}
+}})();
+
+}})();
+"#,
+        user_agent = profile.user_agent,
+        app_version = profile.app_version,
+        platform = profile.platform,
+        vendor = profile.vendor,
+        vendor_sub = profile.vendor_sub,
+        product_sub = profile.product_sub,
+        language = profile.language,
+        languages_json = languages_json,
+        hardware_concurrency = profile.hardware_concurrency,
+        device_memory = profile.device_memory,
+        max_touch_points = profile.max_touch_points,
+        do_not_track = match profile.do_not_track {
+            Some(true) => "\"1\"",
+            Some(false) => "\"0\"",
+            None => "null",
+        },
+        cookie_enabled = profile.cookie_enabled,
+        pdf_viewer_enabled = profile.pdf_viewer_enabled,
+        screen_width = profile.screen_width,
+        screen_height = profile.screen_height,
+        screen_avail_width = profile.screen_avail_width,
+        screen_avail_height = profile.screen_avail_height,
+        color_depth = profile.color_depth,
+        pixel_depth = profile.pixel_depth,
+        device_pixel_ratio = profile.device_pixel_ratio,
+        inner_width = profile.inner_width,
+        inner_height = profile.inner_height,
+        outer_width = profile.outer_width,
+        outer_height = profile.outer_height,
+        timezone = profile.timezone,
+    )
 }
 
 #[cfg(test)]
