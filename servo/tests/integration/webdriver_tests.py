@@ -299,6 +299,199 @@ def run_all(base_url: str, junit_path: str):
 
     suite.run("delete_session", test_delete_session)
 
+    # ── Fingerprint profile tests (TDD) ───────────────────────────────────────
+    #
+    # NOTE: These tests WILL FAIL until BrowserProfile::chrome_win11_us() is
+    # fully wired into servoshell at launch time (navigator overrides, screen
+    # dimensions, WebGL masking, canvas noise, timezone spoofing).  They are
+    # intentionally red — they document the expected contract so that once the
+    # implementation lands, the suite turns green automatically.
+    #
+    # Expected values are taken directly from BrowserProfile::chrome_win11_us()
+    # in components/nightglow/src/profile.rs.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Re-open a fresh session for the profile tests (test 11 deleted the old one).
+    def _reopen_session():
+        sid = s.new_session()
+        assert sid, "Could not create session for profile tests"
+
+    suite.run("profile_session_open", _reopen_session)
+
+    # ── 12. navigator.userAgent ───────────────────────────────────────────────
+    _EXPECTED_UA = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    def test_profile_navigator_user_agent():
+        ua = s.execute_script("return navigator.userAgent;")
+        assert ua == _EXPECTED_UA, (
+            f"navigator.userAgent mismatch\n  expected: {_EXPECTED_UA!r}\n  got:      {ua!r}"
+        )
+
+    suite.run("profile_navigator_user_agent", test_profile_navigator_user_agent)
+
+    # ── 13. navigator.platform ────────────────────────────────────────────────
+    def test_profile_navigator_platform():
+        platform = s.execute_script("return navigator.platform;")
+        assert platform == "Win32", (
+            f"navigator.platform mismatch: expected 'Win32', got {platform!r}"
+        )
+
+    suite.run("profile_navigator_platform", test_profile_navigator_platform)
+
+    # ── 14. navigator.hardwareConcurrency ────────────────────────────────────
+    def test_profile_navigator_hardware_concurrency():
+        hc = s.execute_script("return navigator.hardwareConcurrency;")
+        assert hc == 8, (
+            f"navigator.hardwareConcurrency mismatch: expected 8, got {hc!r}"
+        )
+
+    suite.run("profile_navigator_hardware_concurrency", test_profile_navigator_hardware_concurrency)
+
+    # ── 15. navigator.deviceMemory ────────────────────────────────────────────
+    def test_profile_navigator_device_memory():
+        dm = s.execute_script("return navigator.deviceMemory;")
+        assert dm == 8, (
+            f"navigator.deviceMemory mismatch: expected 8, got {dm!r}"
+        )
+
+    suite.run("profile_navigator_device_memory", test_profile_navigator_device_memory)
+
+    # ── 16. navigator.languages ───────────────────────────────────────────────
+    def test_profile_navigator_languages():
+        langs = s.execute_script("return Array.from(navigator.languages);")
+        assert langs == ["en-US", "en"], (
+            f"navigator.languages mismatch: expected ['en-US', 'en'], got {langs!r}"
+        )
+
+    suite.run("profile_navigator_languages", test_profile_navigator_languages)
+
+    # ── 17. screen dimensions ─────────────────────────────────────────────────
+    def test_profile_screen_dimensions():
+        dims = s.execute_script("""
+            return {
+                width:       screen.width,
+                height:      screen.height,
+                availWidth:  screen.availWidth,
+                availHeight: screen.availHeight,
+                colorDepth:  screen.colorDepth,
+                pixelDepth:  screen.pixelDepth
+            };
+        """)
+        expected = {
+            "width": 1920, "height": 1080,
+            "availWidth": 1920, "availHeight": 1040,
+            "colorDepth": 24, "pixelDepth": 24,
+        }
+        for key, val in expected.items():
+            assert dims.get(key) == val, (
+                f"screen.{key} mismatch: expected {val}, got {dims.get(key)!r}"
+            )
+
+    suite.run("profile_screen_dimensions", test_profile_screen_dimensions)
+
+    # ── 18. WebGL unmasked vendor ─────────────────────────────────────────────
+    def test_profile_webgl_unmasked_vendor():
+        result = s.execute_script("""
+            var c = document.createElement('canvas');
+            var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+            if (!gl) return null;
+            var ext = gl.getExtension('WEBGL_debug_renderer_info');
+            if (!ext) return null;
+            return {
+                vendor:   gl.getParameter(ext.UNMASKED_VENDOR_WEBGL),
+                renderer: gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+            };
+        """)
+        if result is None:
+            print("        WebGL not available in headless — skipping vendor check")
+            return
+        vendor = result.get("vendor", "")
+        assert vendor == "NVIDIA Corporation", (
+            f"WebGL unmasked vendor mismatch: expected 'NVIDIA Corporation', got {vendor!r}"
+        )
+
+    suite.run("profile_webgl_unmasked_vendor", test_profile_webgl_unmasked_vendor)
+
+    # ── 19. WebGL unmasked renderer ───────────────────────────────────────────
+    def test_profile_webgl_unmasked_renderer():
+        result = s.execute_script("""
+            var c = document.createElement('canvas');
+            var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+            if (!gl) return null;
+            var ext = gl.getExtension('WEBGL_debug_renderer_info');
+            if (!ext) return null;
+            return {
+                vendor:   gl.getParameter(ext.UNMASKED_VENDOR_WEBGL),
+                renderer: gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+            };
+        """)
+        if result is None:
+            print("        WebGL not available in headless — skipping renderer check")
+            return
+        renderer = result.get("renderer", "")
+        assert "RTX 3070" in renderer, (
+            f"WebGL unmasked renderer mismatch: expected string containing 'RTX 3070', got {renderer!r}"
+        )
+
+    suite.run("profile_webgl_unmasked_renderer", test_profile_webgl_unmasked_renderer)
+
+    # ── 20. Canvas noise (deterministic + altered) ────────────────────────────
+    def test_profile_canvas_noise():
+        renders = s.execute_script("""
+            function render() {
+                var c = document.createElement('canvas'); c.width=50; c.height=10;
+                var ctx = c.getContext('2d');
+                ctx.fillStyle='#ff0000'; ctx.fillRect(0,0,50,10);
+                ctx.fillStyle='rgba(0,128,0,0.5)'; ctx.fillText('ng',5,8);
+                return Array.from(ctx.getImageData(0,0,50,10).data);
+            }
+            return [render(), render()];
+        """)
+        first, second = renders[0], renders[1]
+        # (a) pixels are non-zero — canvas rendered something
+        assert first[0] != 0, (
+            f"Canvas first pixel R value is 0 — canvas did not render"
+        )
+        # (b) both renders produce identical output (noise seed is deterministic)
+        assert first == second, (
+            "Canvas renders differ between calls — noise is non-deterministic"
+        )
+        # (c) at least one red pixel is NOT exactly 255 — noise has been applied.
+        # This assertion is the one that currently FAILS until canvas noise is implemented.
+        red_pixels = [first[i] for i in range(0, len(first), 4)]
+        all_pure_red = all(r == 255 for r in red_pixels)
+        assert not all_pure_red, (
+            "All red channel values are exactly 255 — canvas noise has not been applied"
+        )
+
+    suite.run("profile_canvas_noise", test_profile_canvas_noise)
+
+    # ── 21. Timezone spoofing ─────────────────────────────────────────────────
+    def test_profile_timezone():
+        tz = s.execute_script(
+            "return Intl.DateTimeFormat().resolvedOptions().timeZone;"
+        )
+        assert tz == "America/New_York", (
+            f"Timezone mismatch: expected 'America/New_York', got {tz!r}"
+        )
+
+    suite.run("profile_timezone", test_profile_timezone)
+
+    # ── 22. navigator.webdriver hidden (profile field) ────────────────────────
+    # BrowserProfile::chrome_win11_us() sets hide_webdriver = true.
+    # Re-verify here as an explicit profile-level assertion (complements test 7).
+    def test_profile_hide_webdriver():
+        result = s.execute_script("return navigator.webdriver;")
+        assert not result, (
+            f"navigator.webdriver is {result!r} — profile hide_webdriver flag not applied"
+        )
+
+    suite.run("profile_hide_webdriver", test_profile_hide_webdriver)
+
     _finish(suite, junit_path)
 
 

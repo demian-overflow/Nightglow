@@ -96,6 +96,85 @@ test-integration:
       junit: servo/tests/integration/test-results/webdriver.xml
     expire_in: 1 week
 
+# ── Proxy integration tests ────────────────────────────────────────────────────
+#
+# NOTE: allow_failure: true — proxy routing is not yet implemented in servoshell.
+# The job runs the tests so results are recorded, but a failure does not block
+# the pipeline.  Remove allow_failure once --proxy support lands.
+test-proxy:
+  stage: test
+  allow_failure: true
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create proxynet
+
+    # 1. Start the proxy server container.  It blocks after printing its address.
+    - |
+      docker run -d \
+        --name proxy-server \
+        --network proxynet \
+        -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/proxy_server.py --host 0.0.0.0 --port 8888
+
+    # 2. Resolve proxy container IP
+    - PROXY_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' proxy-server)
+    - echo "proxy-server IP = $PROXY_IP"
+    - sleep 2
+
+    # 3. Start servoshell configured to use the proxy
+    - |
+      docker run -d \
+        --name nightglow-proxy \
+        --network proxynet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7001 \
+        --proxy "http://${PROXY_IP}:8888" \
+        about:blank
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-proxy)
+    - echo "nightglow-proxy IP = $NIGHTGLOW_IP"
+    - sleep 3
+
+    # 4. Run the proxy tests (they start their own internal proxy thread and
+    #    hit the servoshell instance that was configured with PROXY_IP above).
+    #    We pass --proxy-port 8889 so the test-internal proxy listens on a
+    #    different port and does not conflict with the standalone proxy-server.
+    - |
+      docker run --rm \
+        --name nightglow-proxy-tests \
+        --network proxynet \
+        -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/proxy_tests.py \
+          --webdriver-url "http://${NIGHTGLOW_IP}:7001" \
+          --proxy-port 8889 \
+          --junit /tests/test-results/proxy.xml
+
+  after_script:
+    - docker stop  nightglow-proxy    2>/dev/null || true
+    - docker rm    nightglow-proxy    2>/dev/null || true
+    - docker stop  proxy-server       2>/dev/null || true
+    - docker rm    proxy-server       2>/dev/null || true
+    - docker network rm proxynet      2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 10m
+  artifacts:
+    when: always
+    paths:
+      - servo/tests/integration/test-results/
+    reports:
+      junit: servo/tests/integration/test-results/proxy.xml
+    expire_in: 1 week
+
 # ── Cleanup ────────────────────────────────────────────────────────────────────
 cleanup:
   stage: cleanup
