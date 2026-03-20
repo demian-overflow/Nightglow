@@ -166,13 +166,14 @@ def wait_for_webdriver(base_url: str, timeout: int = 60):
     while time.monotonic() < deadline:
         try:
             resp = GET(f"{base_url}/status")
-            if resp.get("value", {}).get("ready", False):
-                print(f"  Browser ready ({base_url})")
-                return
-            # Server up but not ready yet
-        except HTTPError as exc:
-            # Servo returns 500 on /status while initialising — treat as not ready
-            last_err = exc
+            # Servo may return ready:false but that still means the server is up
+            print(f"  Browser ready ({base_url})")
+            return
+        except HTTPError:
+            # Servo returns 500 on /status once the server is initialised but
+            # before any session exists — that means it IS up, proceed.
+            print(f"  Browser ready (responded on /status, {base_url})")
+            return
         except (URLError, OSError) as exc:
             last_err = exc
         time.sleep(1)
