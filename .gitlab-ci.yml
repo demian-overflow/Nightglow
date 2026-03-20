@@ -68,6 +68,10 @@ test-integration:
         --network testnet \
         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
         --headless --webdriver 7000 about:blank
+    # Resolve IP so the Host header is an IP address — Servo's WebDriver
+    # server whitelists all IP-addressed requests but rejects unknown domain names.
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-server)
+    - echo "nightglow-server IP = $NIGHTGLOW_IP"
     - |
       docker run --rm \
         --name nightglow-tests \
@@ -75,7 +79,7 @@ test-integration:
         -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
         python:3.12-slim \
         python3 /tests/webdriver_tests.py \
-          --url http://nightglow-server:7000 \
+          --url "http://${NIGHTGLOW_IP}:7000" \
           --junit /tests/test-results/webdriver.xml
   after_script:
     - docker stop nightglow-server 2>/dev/null || true
