@@ -1,253 +1,121 @@
-variables:
-  CHROMIUM_DIR: /chromium
-  CHROMIUM_VERSION: ""  # leave empty for tip-of-tree, or pin e.g. "131.0.6778.85"
-  BUILDER_IMAGE: registry.noogoo.ch/orderout/nightglow/builder:latest
-  OPERATOR_IMAGE: registry.noogoo.ch/orderout/nightglow/operator:latest
-  # GN args for a headless-capable, anti-fingerprint build.
-  # headless/command_handler is required for --headless=new (Chrome DevTools Protocol).
-  # ozone_platform_headless enables the headless Ozone backend.
-  # exclude_unwind_tables + no symbols = smaller binary.
-  GN_ARGS: >-
-    is_debug=false
-    is_official_build=false
-    symbol_level=0
-    enable_nacl=false
-    blink_symbol_level=0
-    v8_symbol_level=0
-    use_thin_lto=false
-    use_lld=true
-    chrome_pgo_phase=0
-    is_component_build=false
-    enable_headless_command=true
-    ozone_platform_headless=true
-    use_ozone=true
-    proprietary_codecs=false
-    enable_widevine=false
-    exclude_unwind_tables=true
-
 stages:
-  - builder
-  - fetch
-  - patch
   - build
   - test
-  - package
+  - cleanup
 
-# ─── Build the builder image ───────────────────────────────────────────────────
-# Auto-runs only when Dockerfile.builder changes. Otherwise skipped entirely.
-# Force-trigger by setting CI_FORCE_BUILD_BUILDER=true in a manual pipeline.
-build-builder-image:
-  stage: builder
-  image: docker:24
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_BUILDKIT: "1"
+
+# ── Build ──────────────────────────────────────────────────────────────────────
+build:
+  stage: build
+  retry: 1
+  image: docker:27
   services:
-    - name: docker:24-dind
-      alias: docker
-  variables:
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_HOST: tcp://docker:2375
-  rules:
-    - if: '$CI_FORCE_BUILD_BUILDER == "true"'
-      when: on_success
-    - changes:
-        - src/Dockerfile.builder
-      when: on_success
-    - when: never
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
-    - until docker info; do echo "Waiting for DinD..."; sleep 2; done
-    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
-    - docker build -t "${BUILDER_IMAGE}" -f src/Dockerfile.builder src/
-    - docker push "${BUILDER_IMAGE}"
-  tags:
-    - kubernetes
-
-# ─── Fetch Chromium source onto the PVC ────────────────────────────────────────
-# Manual gate — runs once, is idempotent. Downstream stages always run on push
-# because apply-patches does not declare it as a `needs` dependency (the source
-# is assumed to already be on the PVC after the first manual run).
-# The chromium-source PVC is mounted at /chromium by the runner config globally.
-fetch-chromium:
-  stage: fetch
-  image: "${BUILDER_IMAGE}"
-  variables:
-    GIT_STRATEGY: fetch
-    CHROMIUM_DIR: /chromium
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build
+        --cache-from $CI_REGISTRY_IMAGE:latest
+        --build-arg BUILDKIT_INLINE_CACHE=1
+        -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+        -t $CI_REGISTRY_IMAGE:latest
+        servo/
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $CI_REGISTRY_IMAGE:latest
   rules:
-    - when: manual
-      allow_failure: true  # non-blocking: lets patch/build/test run on every push
-  timeout: 6h
-  script:
-    - bash src/scripts/fetch-chromium.sh
-  tags:
-    - kubernetes
-  interruptible: false
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 3h
 
-# ─── Apply fingerprint patches ─────────────────────────────────────────────────
-# Runs automatically on every push. Does not wait for fetch-chromium since
-# the source is persistent on the PVC from a previous manual fetch.
-apply-patches:
-  stage: patch
-  image: "${BUILDER_IMAGE}"
+# ── Unit tests ─────────────────────────────────────────────────────────────────
+test-unit:
+  stage: test
+  image: rust:1.92
+  script:
+    - cd servo
+    - cargo test -p nightglow --locked -- --test-threads=4
   rules:
     - when: on_success
-  variables:
-    GIT_STRATEGY: fetch
-    CHROMIUM_DIR: /chromium
-    PATCHES_DIR: "${CI_PROJECT_DIR}/src/patches"
-  script:
-    - bash src/scripts/apply-patches.sh
-  tags:
-    - kubernetes
-  interruptible: false
-
-# ─── Build Nightglow chrome binary ─────────────────────────────────────────────
-build-chrome:
-  stage: build
-  image: "${BUILDER_IMAGE}"
-  needs:
-    - apply-patches
-  variables:
-    GIT_STRATEGY: fetch
-    CHROMIUM_DIR: /chromium
-  timeout: 8h
-  script:
-    - |
-      if [[ ! -d "${CHROMIUM_DIR}/src" ]]; then
-        echo "SKIP: Chromium source not found. Run fetch-chromium manually first."
-        exit 0
-      fi
-    - cd "${CHROMIUM_DIR}/src"
-    - mkdir -p out/Nightglow
-    - |
-      cat > out/Nightglow/args.gn <<GNEOF
-      ${GN_ARGS}
-      GNEOF
-    - gn gen out/Nightglow
-    - ccache -z
-    - autoninja -C out/Nightglow chrome
-    - ccache -s
-    - |
-      VERSION=$(cat chrome/VERSION | awk -F= 'BEGIN{M=""} /MAJOR/{M=$2} /MINOR/{m=$2} /BUILD/{b=$2} /PATCH/{p=$2} END{print M"."m"."b"."p}')
-      echo "binary=${CHROMIUM_DIR}/src/out/Nightglow/chrome" > "${CI_PROJECT_DIR}/build-info.txt"
-      echo "version=${VERSION}" >> "${CI_PROJECT_DIR}/build-info.txt"
-      echo "Build complete: chrome ${VERSION}"
-  tags:
-    - kubernetes
-  interruptible: true
+  timeout: 30m
   artifacts:
-    paths:
-      - build-info.txt
+    when: always
+    reports:
+      junit: servo/test-results/unit-*.xml
     expire_in: 1 week
 
-# ─── Test: fingerprint surface checks (headless) ───────────────────────────────
-# Runs the Nightglow binary in --headless=new mode and validates that
-# key fingerprint surfaces return expected spoofed values and that
-# automation/CDP markers are absent.
-test-fingerprint:
+# ── Integration tests ──────────────────────────────────────────────────────────
+test-integration:
   stage: test
-  image: "${BUILDER_IMAGE}"
   needs:
-    - build-chrome
-  variables:
-    GIT_STRATEGY: fetch
-    CHROMIUM_DIR: /chromium
-    CHROME_BIN: /chromium/src/out/Nightglow/chrome
-    # Sample fingerprint profile for tests
-    FP_PROFILE: >-
-      {
-        "navigator": {
-          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "platform": "Win32",
-          "hardwareConcurrency": 8,
-          "deviceMemory": 8,
-          "language": "en-US",
-          "languages": "en-US,en",
-          "maxTouchPoints": 0
-        },
-        "screen": {
-          "width": 1920, "height": 1080,
-          "availWidth": 1920, "availHeight": 1040,
-          "colorDepth": 24, "pixelDepth": 24,
-          "devicePixelRatio": 1.0
-        },
-        "webgl": {
-          "vendor": "Google Inc. (NVIDIA)",
-          "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-          "canvasNoiseAmplitude": 0.003
-        },
-        "audio": { "noiseAmplitude": 0.0001, "noiseSeed": 42 },
-        "network": {
-          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "acceptLanguage": "en-US,en;q=0.9",
-          "chUa": "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-          "chUaPlatform": "Windows",
-          "chUaMobile": false
-        },
-        "timezone": {
-          "timezoneId": "America/New_York",
-          "locale": "en-US"
-        }
-      }
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create testnet
     - |
-      if [[ ! -f "${CHROME_BIN}" ]]; then
-        echo "SKIP: Chrome binary not found at ${CHROME_BIN}. Run fetch-chromium + build-chrome first."
-        exit 0
-      fi
-    - apt-get install -y --no-install-recommends nodejs npm jq 2>/dev/null || true
-    - FP_B64=$(echo "${FP_PROFILE}" | python3 -c "import sys,base64; print(base64.b64encode(sys.stdin.buffer.read()).decode())")
-    - bash src/scripts/test-fingerprint.sh "${CHROME_BIN}" "${FP_B64}"
-  tags:
-    - kubernetes
+      docker run -d \
+        --name nightglow-server \
+        --network testnet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7000 about:blank
+    - |
+      docker run --rm \
+        --name nightglow-tests \
+        --network testnet \
+        -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/webdriver_tests.py \
+          --url http://nightglow-server:7000 \
+          --junit /tests/test-results/webdriver.xml
+  after_script:
+    - docker stop nightglow-server 2>/dev/null || true
+    - docker rm   nightglow-server 2>/dev/null || true
+    - docker network rm testnet    2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 15m
   artifacts:
     when: always
     paths:
-      - test-results/
+      - servo/tests/integration/test-results/
     reports:
-      junit: test-results/junit.xml
+      junit: servo/tests/integration/test-results/webdriver.xml
     expire_in: 1 week
 
-# ─── Package: build operator image ────────────────────────────────────────────
-# The nightglow-operator image is what ArgoCD deploys. It contains the
-# Nightglow chrome binary + the Go operator binary.
-# The operator manages BrowserlessPool / BrowserSession CRDs.
-build-operator-image:
-  stage: package
-  image: docker:24
-  services:
-    - name: docker:24-dind
-      alias: docker
-  needs:
-    - job: test-fingerprint
-    - job: build-chrome
-      artifacts: true
-  variables:
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_HOST: tcp://docker:2375
-    GIT_STRATEGY: fetch
-    CHROMIUM_DIR: /chromium
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: on_success
-    - when: never
+# ── Cleanup ────────────────────────────────────────────────────────────────────
+cleanup:
+  stage: cleanup
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache curl jq
   script:
     - |
-      if [[ ! -f build-info.txt ]]; then
-        echo "SKIP: build-info.txt not found — chrome was not built (fetch-chromium not run yet)."
-        exit 0
-      fi
-    - until docker info; do echo "Waiting for DinD..."; sleep 2; done
-    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
-    - |
-      VERSION=$(grep "^version=" build-info.txt | cut -d= -f2)
-      docker build \
-        --build-arg CHROME_SRC="${CHROMIUM_DIR}/src/out/Nightglow" \
-        -t "${OPERATOR_IMAGE}" \
-        -t "registry.noogoo.ch/orderout/nightglow/operator:${VERSION}" \
-        -f src/Dockerfile.operator \
-        .
-    - docker push "${OPERATOR_IMAGE}"
-    - |
-      VERSION=$(grep "^version=" build-info.txt | cut -d= -f2)
-      docker push "registry.noogoo.ch/orderout/nightglow/operator:${VERSION}"
-  tags:
-    - kubernetes
+      REPOS=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories" | jq -r '.[].id')
+      for REPO_ID in $REPOS; do
+        echo "→ Cleaning repo $REPO_ID"
+        STALE=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories/$REPO_ID/tags?per_page=100" | \
+          jq -r '.[] | select(.name | test("^[0-9a-f]{8}$")) | .name')
+        for TAG in $STALE; do
+          echo "  Deleting $TAG"
+          curl -sf -X DELETE --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
+            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories/$REPO_ID/tags/$TAG" || true
+        done
+      done
+  needs:
+    - build
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+      when: on_success
+  allow_failure: true
