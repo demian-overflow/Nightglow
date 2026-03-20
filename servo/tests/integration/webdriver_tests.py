@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 import urllib.request
 import urllib.parse
 
@@ -170,6 +170,9 @@ def wait_for_webdriver(base_url: str, timeout: int = 60):
                 print(f"  Browser ready ({base_url})")
                 return
             # Server up but not ready yet
+        except HTTPError as exc:
+            # Servo returns 500 on /status while initialising — treat as not ready
+            last_err = exc
         except (URLError, OSError) as exc:
             last_err = exc
         time.sleep(1)
