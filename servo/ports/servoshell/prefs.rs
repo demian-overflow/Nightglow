@@ -763,7 +763,8 @@ fn apply_nightglow_profile(
     }
 
     // 3. Timezone via env var (Servo reads system TZ)
-    std::env::set_var("TZ", &profile.timezone);
+    // SAFETY: single-threaded at this point (before Servo spawns worker threads)
+    unsafe { std::env::set_var("TZ", &profile.timezone) };
 
     // 4. Generate fingerprint userscript and write to temp dir
     let script = generate_fingerprint_script(profile);
