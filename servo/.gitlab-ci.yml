@@ -1,6 +1,7 @@
 stages:
   - build
   - test
+  - fingerprint
   - cleanup
 
 variables:
@@ -122,6 +123,47 @@ test-integration:
     reports:
       junit: tests/integration/test-results/webdriver.xml
     expire_in: 1 week
+
+
+# ── Fingerprint report ────────────────────────────────────────────────────────
+# Starts servoshell headless and collects CreepJS-style fingerprint metrics:
+# navigator, screen, timezone, WebGL, canvas, audio, fonts, features, math,
+# error stack format, bot-detection heuristics.
+# Informational only — allow_failure so it never blocks the pipeline.
+
+fingerprint:
+  stage: fingerprint
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create fpnet
+    - |
+      docker run -d         --name nightglow-fp         --network fpnet         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA         --headless --webdriver 7000 about:blank
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-fp)
+    - echo "nightglow IP = $NIGHTGLOW_IP"
+    - sleep 3
+    - |
+      docker run --rm         --network fpnet         -v "$CI_PROJECT_DIR/tests/integration:/tests"         python:3.12-slim         python3 /tests/fingerprint_report.py --url "http://$NIGHTGLOW_IP:7000"         2>&1 | tee fingerprint-output.txt
+  after_script:
+    - docker stop nightglow-fp 2>/dev/null || true
+    - docker rm   nightglow-fp 2>/dev/null || true
+    - docker network rm fpnet  2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 10m
+  allow_failure: true
+  artifacts:
+    when: always
+    paths:
+      - fingerprint-output.txt
+    expire_in: 2 weeks
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
 # Deletes short-SHA tags from the registry after a successful build.
