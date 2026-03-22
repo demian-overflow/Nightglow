@@ -107,4 +107,6 @@ COPY --from=builder /build/resources /app/resources
 
 ENV SERVO_RESOURCES_PATH=/app/resources
 
+EXPOSE 7000
 ENTRYPOINT ["/app/nightglow"]
+CMD ["--headless", "--webdriver", "7000", "about:blank"]
