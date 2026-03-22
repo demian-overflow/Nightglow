@@ -2,6 +2,7 @@ stages:
   - build
   - test
   - fingerprint
+  - creepjs
   - cleanup
 
 variables:
@@ -163,6 +164,56 @@ fingerprint:
     when: always
     paths:
       - fingerprint-output.txt
+    expire_in: 2 weeks
+
+# ── CreepJS headless-resistance test ─────────────────────────────────────────
+# Loads the real CreepJS page inside servoshell and scrapes the three confidence
+# scores: like-headless%, headless%, stealth%.  Prints the full signal breakdown
+# as a CI artifact.  Informational (allow_failure) — does not block the pipeline.
+
+creepjs:
+  stage: creepjs
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create creepnet
+    - |
+      docker run -d \
+        --name nightglow-creep \
+        --network creepnet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7000 about:blank
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-creep)
+    - echo "nightglow IP = $NIGHTGLOW_IP"
+    - sleep 3
+    - |
+      docker run --rm \
+        --network creepnet \
+        -v "$CI_PROJECT_DIR/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/creepjs_test.py \
+          --url "http://$NIGHTGLOW_IP:7000" \
+          --threshold 0 \
+        2>&1 | tee creepjs-output.txt
+  after_script:
+    - docker stop nightglow-creep 2>/dev/null || true
+    - docker rm   nightglow-creep 2>/dev/null || true
+    - docker network rm creepnet  2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 5m
+  allow_failure: true
+  artifacts:
+    when: always
+    paths:
+      - creepjs-output.txt
     expire_in: 2 weeks
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
