@@ -1,6 +1,8 @@
 stages:
   - build
   - test
+  - fingerprint
+  - creepjs
   - cleanup
 
 variables:
@@ -67,12 +69,9 @@ test-integration:
         --name nightglow-server \
         --network testnet \
         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
-        --headless --webdriver 7000 \
-        --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-        --nightglow-profile '{"user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","platform":"Win32","app_version":"5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","product":"Gecko","vendor":"Google Inc.","vendor_sub":"","product_sub":"20030107","language":"en-US","accept_language":"en-US,en;q=0.9","timezone":"America/New_York","timezone_offset":-300,"screen_width":1920,"screen_height":1080,"screen_avail_width":1920,"screen_avail_height":1040,"color_depth":24,"pixel_depth":24,"device_pixel_ratio":1.0,"inner_width":1280,"inner_height":720,"outer_width":1920,"outer_height":1080,"hardware_concurrency":8,"device_memory":8.0,"plugins":[{"name":"PDF Viewer","description":"Portable Document Format","filename":"internal-pdf-viewer","mime_types":["application/pdf","text/pdf"]}],"fonts":[],"canvas_noise_seed":12345678,"webgl_vendor":"Google Inc. (NVIDIA)","webgl_renderer":"ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)","webgl_unmasked_vendor":"NVIDIA Corporation","webgl_unmasked_renderer":"NVIDIA GeForce RTX 3070","audio_noise_seed":87654321,"proxy":null,"spoofed_ip":null,"do_not_track":false,"cookie_enabled":true,"java_enabled":false,"pdf_viewer_enabled":true,"hide_webdriver":true,"max_touch_points":0,"label":"chrome124-win11-us-east","id":"00000000-0000-0000-0000-000000000001"}' \
-        about:blank
-    # Resolve IP so the Host header is an IP address — Servo's WebDriver
-    # server whitelists all IP-addressed requests but rejects unknown domain names.
+        --headless --webdriver 7000 about:blank
+    # Resolve IP — Servo's WebDriver whitelists IP-addressed requests but
+    # rejects unknown domain names.
     - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-server)
     - echo "nightglow-server IP = $NIGHTGLOW_IP"
     - |
@@ -102,8 +101,7 @@ test-integration:
 # ── Proxy integration tests ────────────────────────────────────────────────────
 #
 # NOTE: allow_failure: true — proxy routing is not yet implemented in servoshell.
-# The job runs the tests so results are recorded, but a failure does not block
-# the pipeline.  Remove allow_failure once --proxy support lands.
+# Remove allow_failure once --proxy support lands.
 test-proxy:
   stage: test
   allow_failure: true
@@ -118,8 +116,6 @@ test-proxy:
   script:
     - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
     - docker network create proxynet
-
-    # 1. Start the proxy server container.  It blocks after printing its address.
     - |
       docker run -d \
         --name proxy-server \
@@ -127,13 +123,9 @@ test-proxy:
         -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
         python:3.12-slim \
         python3 /tests/proxy_server.py --host 0.0.0.0 --port 8888
-
-    # 2. Resolve proxy container IP
     - PROXY_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' proxy-server)
     - echo "proxy-server IP = $PROXY_IP"
     - sleep 2
-
-    # 3. Start servoshell configured to use the proxy
     - |
       docker run -d \
         --name nightglow-proxy \
@@ -141,16 +133,10 @@ test-proxy:
         -e http_proxy="http://${PROXY_IP}:8888" \
         -e https_proxy="http://${PROXY_IP}:8888" \
         $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
-        --headless --webdriver 7001 \
-        about:blank
+        --headless --webdriver 7001 about:blank
     - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-proxy)
     - echo "nightglow-proxy IP = $NIGHTGLOW_IP"
     - sleep 3
-
-    # 4. Run the proxy tests (they start their own internal proxy thread and
-    #    hit the servoshell instance that was configured with PROXY_IP above).
-    #    We pass --proxy-port 8889 so the test-internal proxy listens on a
-    #    different port and does not conflict with the standalone proxy-server.
     - |
       docker run --rm \
         --name nightglow-proxy-tests \
@@ -161,7 +147,6 @@ test-proxy:
           --webdriver-url "http://${NIGHTGLOW_IP}:7001" \
           --proxy-port 8889 \
           --junit /tests/test-results/proxy.xml
-
   after_script:
     - docker stop  nightglow-proxy    2>/dev/null || true
     - docker rm    nightglow-proxy    2>/dev/null || true
@@ -178,6 +163,96 @@ test-proxy:
     reports:
       junit: servo/tests/integration/test-results/proxy.xml
     expire_in: 1 week
+
+# ── Fingerprint report ─────────────────────────────────────────────────────────
+fingerprint:
+  stage: fingerprint
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create fpnet
+    - |
+      docker run -d \
+        --name nightglow-fp \
+        --network fpnet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7000 about:blank
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-fp)
+    - echo "nightglow IP = $NIGHTGLOW_IP"
+    - sleep 3
+    - |
+      docker run --rm \
+        --network fpnet \
+        -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/fingerprint_report.py --url "http://$NIGHTGLOW_IP:7000" \
+        2>&1 | tee fingerprint-output.txt
+  after_script:
+    - docker stop nightglow-fp 2>/dev/null || true
+    - docker rm   nightglow-fp 2>/dev/null || true
+    - docker network rm fpnet  2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 10m
+  allow_failure: true
+  artifacts:
+    when: always
+    paths:
+      - fingerprint-output.txt
+    expire_in: 2 weeks
+
+# ── CreepJS headless-resistance test ──────────────────────────────────────────
+creepjs:
+  stage: creepjs
+  needs:
+    - build
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker network create creepnet
+    - |
+      docker run -d \
+        --name nightglow-creep \
+        --network creepnet \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA \
+        --headless --webdriver 7000 about:blank
+    - NIGHTGLOW_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' nightglow-creep)
+    - echo "nightglow IP = $NIGHTGLOW_IP"
+    - sleep 3
+    - |
+      docker run --rm \
+        --network creepnet \
+        -v "$CI_PROJECT_DIR/servo/tests/integration:/tests" \
+        python:3.12-slim \
+        python3 /tests/creepjs_test.py \
+          --url "http://$NIGHTGLOW_IP:7000" \
+          --threshold 0 \
+        2>&1 | tee creepjs-output.txt
+  after_script:
+    - docker stop nightglow-creep 2>/dev/null || true
+    - docker rm   nightglow-creep 2>/dev/null || true
+    - docker network rm creepnet  2>/dev/null || true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+  timeout: 5m
+  allow_failure: true
+  artifacts:
+    when: always
+    paths:
+      - creepjs-output.txt
+    expire_in: 2 weeks
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
 cleanup:
