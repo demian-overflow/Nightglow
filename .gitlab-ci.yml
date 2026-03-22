@@ -187,13 +187,16 @@ cleanup:
     - apk add --no-cache curl jq
   script:
     - |
+      # Only delete SHA tags older than 4 hours to avoid racing with concurrent pipelines
+      CUTOFF=$(date -u -d "-14400 seconds" '+%Y-%m-%dT%H:%M:%S')
+      echo "Deleting SHA tags created before $CUTOFF"
       REPOS=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
         "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories" | jq -r '.[].id')
       for REPO_ID in $REPOS; do
         echo "→ Cleaning repo $REPO_ID"
         STALE=$(curl -sf --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/registry/repositories/$REPO_ID/tags?per_page=100" | \
-          jq -r '.[] | select(.name | test("^[0-9a-f]{8}$")) | .name')
+          jq -r --arg cutoff "$CUTOFF" '.[] | select(.name | test("^[0-9a-f]{8}$")) | select(.created_at < $cutoff) | .name')
         for TAG in $STALE; do
           echo "  Deleting $TAG"
           curl -sf -X DELETE --header "PRIVATE-TOKEN: $GITLAB_CLEANUP_TOKEN" \
